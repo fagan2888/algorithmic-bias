@@ -299,8 +299,8 @@ def buildROCCurve(ddict_list):
         cum_tn -= norecid_hist[i]
         cum_fn -= recid_hist[i]
 
-        fpr_i = cum_fp / (cum_fp + cum_tn)
-        recall_i = cum_tp / (cum_tp + cum_fn)
+        fpr_i = float(cum_fp) / (cum_fp + cum_tn)
+        recall_i = float(cum_tp) / (cum_tp + cum_fn)
         fpr_by_decile.append(fpr_i)
         recall_by_decile.append(recall_i)
     print('AUC:' + str(computeROC_AUC((fpr_by_decile, recall_by_decile))))
@@ -594,6 +594,9 @@ import sklearn
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import KFold
 from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LogisticRegression
+from sklearn import preprocessing
+from sklearn.pipeline import make_pipeline
 
 
 #gl_default_gbr_n_estimators = 1000
@@ -1272,33 +1275,38 @@ def trainGBR(X_train, y_train, n_estimators=None, max_depth=None, max_features=N
 
 
 def trainLR(X_train, y_train, n_estimators=None, max_depth=None, max_features=None, subsample=None):
-
-    if n_estimators == None:
-        gbr_n_estimators = gl_default_gbr_n_estimators
-    else:
-        gbr_n_estimators = n_estimators
-    if max_depth == None:
-        gbr_max_depth = gl_default_gbr_max_depth
-    else:
-        gbr_max_depth = max_depth
-    if max_features == None:
-        gbr_max_features = gl_default_gbr_max_features
-    else:
-        gbr_max_features = max_features
-    if subsample == None:
-        gbr_subsample = gl_default_gbr_subsample
-    else:
-        gbr_subsample = subsample
-
     linr = LinearRegression(normalize = True)
 
     linr.fit(X_train, y_train)
 
     return linr
 
+    
+#
+#
+############################
 
-#def testLR(X_test, linr):
-#    return linr.predict(X_test)
+
+############################
+#
+#Logistic Regression
+#
+
+
+    
+def trainLogR(X_train, y_train, n_estimators=None, max_depth=None, max_features=None, subsample=None):
+    global gl_last_scaler
+
+    #print('in trainLogR')
+    
+    scaler = preprocessing.StandardScaler()
+    logr = LogisticRegression()
+    logr_pipeline = make_pipeline(scaler, logr)
+
+    logr_pipeline.fit(X_train, y_train)
+
+    return logr_pipeline
+
     
     
 #
@@ -1313,6 +1321,12 @@ def trainLR(X_train, y_train, n_estimators=None, max_depth=None, max_features=No
 #
     
 def testModel(X_test, model):
+    if str(type(model)) == "<class 'sklearn.pipeline.Pipeline'>":
+        if model.steps[1][0] == 'logisticregression':
+            probs_ar = model.predict_proba(X_test)
+            prob_1_ar = [item[1] for item in probs_ar]
+            #print('min_prob: ' + str(min(prob_1_ar)))
+            return prob_1_ar
     return model.predict(X_test)
 
     
@@ -1349,7 +1363,6 @@ def plotPredictionScores(y, pred_scores, ratio_color=None, ymax = 700, show_plot
     range_min = gl_score_plot_range_min
     range_max = gl_score_plot_range_max
     the_range = range_max - range_min
-    #n_bins = 10
     n_bins = 20    
     #n_bins = 30    
     #n_bins = 40
@@ -1595,6 +1608,8 @@ def plotTable(table_ar, offset, scale):
 #  Recall = TP / (TP + FN)
 #Returns an ROC curve in the form of a tuple: (list-of-float: fpr_list, list-of-float: recall_list)
 #Note that the spacing of False Postive Rate in fpr_list will not be even.
+#Note that in the event that many prediction scores are identical, then the samples in y_list will
+#come in random bunches of 1 or 0. This will cause the ROC curve to be wiggly.
 def buildROCCurveFromPredictionScores(y_list, pred_list):
     if len(y_list) != len(pred_list):
         print('y_list ' + str(len(y_list)) + ' needs to be the same length as pred_list ' + str(len_pred_list))
@@ -1608,7 +1623,7 @@ def buildROCCurveFromPredictionScores(y_list, pred_list):
     #sort by prediction score
     y_pred_tup_list.sort(key=lambda x: x[1], reverse=True)  #sweep from highest prediction score to lowest,
                                                             #catching more True Postives and False Positives as we go.
-    
+                                                            
     recid_total = sum(y_list)
     norecid_total = len(y_list) - recid_total
 
@@ -1628,8 +1643,8 @@ def buildROCCurveFromPredictionScores(y_list, pred_list):
             cum_fn -= 1
             cum_tp += 1
 
-        fpr_i = cum_fp / (cum_fp + cum_tn)
-        recall_i = cum_tp / (cum_tp + cum_fn)
+        fpr_i = float(cum_fp) / (cum_fp + cum_tn)
+        recall_i = float(cum_tp) / (cum_tp + cum_fn)
         fpr_by_increment.append(fpr_i)
         recall_by_increment.append(recall_i)
         
@@ -1911,16 +1926,17 @@ def testFeatureContributionsToPrediction_SelectMostImportantFeatures_ELI5(gbr, d
 #
 
 
-#gl_model = 'gbr'
-#gl_model = 'linr'
+#gl_model = 'gbr'   Gradient Boosting Regressor
+#gl_model = 'linr'  Linear Regression
+#gl_model = 'logr'  Logistic Regression
 
 
-#model_type can be one of {'gbr', 'linr'}
+#model_type can be one of {'gbr', 'linr', 'logr'}
 def setModelType(model_type = 'gbr'):
     global gl_model_type
     global gl_model_train_fun
 
-    if model_type not in ('gbr', 'linr'):
+    if model_type not in ('gbr', 'linr', 'logr'):
         print('model type ' + model_type + ' not recognized')
         return
     gl_model_type = model_type
@@ -1929,13 +1945,15 @@ def setModelType(model_type = 'gbr'):
         gl_model_train_fun = trainGBR
     elif model_type == 'linr':
         gl_model_train_fun = trainLR
+    elif model_type == 'logr':
+        gl_model_train_fun = trainLogR        
 
 
         
 try:
     gl_model_type
 except:
-    setModelType('linr')
+    setModelType('logr')
 
                 
 
