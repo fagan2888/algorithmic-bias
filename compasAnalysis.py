@@ -12,7 +12,7 @@
 #https://github.com/propublica/compas-analysis
 #
 #Eric Saund
-#February, 2020
+#February, March 2020
 #
 
 #Contents:
@@ -21,6 +21,7 @@
 # -build independent models
 #   -feature engineering
 #   -plotting and evaluation functions
+#   -some additional material for running models on the Titanic data set
 # -ELI5 feature importances
 
 
@@ -34,6 +35,7 @@ import numpy as np
 import random
 #import builtins
 import math
+import json
 
 
 
@@ -83,6 +85,20 @@ def loadData(recid_type='recid'):
         for row in reader:
             row_list.append(row)
     return row_list
+
+
+#Writes a list of dicts to to a json file
+def writeTDictListToJSONFile(tdict_list, filepath):
+    with open(filepath, 'w') as file:
+        json.dump(tdict_list, file, indent=4)
+
+
+def readDDictListFromJSONFile(filepath):
+    with open(filepath, 'r', encoding='utf8') as file:
+        ddict_list = json.load(file)
+    return ddict_list
+    
+
 
 
 #field-name-value-list is a list of tuple, (str field_name, str comp, str or int field_value)
@@ -144,10 +160,19 @@ def applyFilters(ddict_list, recid_type='recid'):
 
 
 
-def buildHistByDecile(ddict_list):
-    hist = [0]*10
+#This builds a histogram of counts of the decile_score_tag which should be an int
+#from 0 to n_bins-1.
+def buildHistByDecile(ddict_list, decile_score_tag=gl_decile_score_tag, n_bins=10):
+    hist = [0]*n_bins
     for ddict in ddict_list:
-        decile = int(ddict.get(gl_decile_score_tag)) - 1
+        decile_score = ddict.get(decile_score_tag)
+        if decile_score == None:
+            print('problem in buildHistByDecile: no decile_score_tag named ' + decile_score_tag)
+            return
+        #if type(decile_score) is str:
+        #    print('problem in buildHistByDecile: decile_score is type string: ' + decile_score)
+        #    return
+        decile = int(decile_score) - 1
         hist[decile] += 1
     return hist
 
@@ -262,9 +287,10 @@ def plotRecidByDecile(ddict_list, recid_rate_color='blue', plot_what='both', yma
 
     if plot_what in ('both', 'all', 'ratio'):
         for i in range(N):
-            ratio_plt = float(recid_hist[i]) / (recid_hist[i] + norecid_hist[i]) * ymax
+            denom = (recid_hist[i] + norecid_hist[i])
+            ratio_plt = ymax * float(recid_hist[i]) / max(denom, .00001)
             ratio_hist.append(ratio_plt)
-            print(str(i) + ' ratio: ' + str(float(recid_hist[i]) / (recid_hist[i] + norecid_hist[i])))
+            #print(str(i) + ' ratio: ' + str(float(recid_hist[i]) / (recid_hist[i] + norecid_hist[i])))
         p3 = plt.plot(ind, ratio_hist, color=recid_rate_color)
     
     plt.show()
@@ -380,7 +406,7 @@ def buildConfusionMatrix(ddict_list, decile_score_threshold = 4, print_p=True):
     recid_high = filterDdict(recid_list, [(gl_decile_score_tag, '>', decile_score_threshold)]) 
 
     confusion_matrix.append([len(recid_low), len(recid_high)])
-    count = sum(confusion_matrix[0]) + sum(confusion_matrix[1])    
+    count = sum(confusion_matrix[0]) + sum(confusion_matrix[1])
 
     if print_p:
         tn = confusion_matrix[0][0]
@@ -541,25 +567,37 @@ def generateUniformDecileSamplesLinearPrediction(N, race_label, frac_recid, min_
 #The samples decline in proportion to decile_score.
 #decile_score = 1 (bin 0) has a fraction of the total population N as initial_frac_N.
 #Then, the number of samples per decile declines linearly so the total popluation is N.
+#To get the recidivism rate, you have to adjust frac_recid, decile_0_frac_recid, and decile_0_recid_offset.
+#
 #The overall recidivism rate is frac_recid.
 #The imagined prediction algorithm is linear.  It assigns gl_recidivism_tag at a level
 #of min_frac_recid for decile_score = 1.  Then, is_recid increases linearly
 #with decile_score such that the total fraction of is_recid samples matches frac_recid.
-def generateDecliningDecileSamplesLinearPrediction(N, race_label, frac_recid, min_frac_recid, initial_frac_N):
+def generateDecliningDecileSamplesLinearPrediction(N, race_label, frac_recid, decile_0_frac_recid,
+                                                   decile_0_recid_offset, initial_frac_N):
     ddict_list = []
     frac_delta = (initial_frac_N - 1.0)
     n_slope = frac_delta / 4.5
 
     n_sum = 0
+    n_recid_sum = 0
     for decile_i in range(10):
         frac = n_slope * decile_i
         n_at_decile = int(round((N/10.0) * (initial_frac_N - frac)))
         n_sum += n_at_decile
-        #print('decile_i: ' + str(decile_i) + ' n_sum: ' + str(n_sum))        
 
         str_decile = str(decile_i+1)
-        n_recid_at_decile = int(round(n_at_decile * (min_frac_recid + decile_i * (frac_recid - min_frac_recid)/4.5)))
-        n_norecid_at_decile = n_at_decile - n_recid_at_decile
+
+        frac_recid_at_decile = decile_0_frac_recid + decile_i * (frac_recid - decile_0_frac_recid)/4.5 \
+            + decile_0_recid_offset
+        print('frac_recid_at_decile ' + str(decile_i) + ' : ' + str(frac_recid_at_decile))
+        
+        n_recid_at_decile = int(round(n_at_decile * frac_recid_at_decile))
+        n_recid_sum += n_recid_at_decile
+        n_norecid_at_decile = n_at_decile - n_recid_at_decile        
+        
+        print('decile_i: ' + str(decile_i) + ' n_at_decile: ' + str(n_at_decile) + ' n_sum: ' + str(n_sum) + ' n_recid_at_decile: ' + str(n_recid_at_decile) + ' n_norecid_at_decile: ' + str(n_norecid_at_decile) + ' sum: ' + str(n_recid_sum))
+
         
         for i in range(n_recid_at_decile):
             ddict = {'race': race_label,
@@ -571,12 +609,106 @@ def generateDecliningDecileSamplesLinearPrediction(N, race_label, frac_recid, mi
                      'decile_score': str_decile,
                      gl_recidivism_tag: '0'}
             ddict_list.append(ddict)
-    return ddict_list
+    frac_recid = float(n_recid_sum)/n_sum
+    #print('n_recid_sum: ' + str(n_recid_sum) + ' str: frac_recid: ' + str(frac_recid))
+    return ddict_list, frac_recid
 
+
+
+
+#Use Newton's method to find the best decile_0_recid_offset to the function,
+#generateDecliningDecileSamplesLinearPrediction() in order to achieve the target_frac_recid.
+def iterateGenerateDecliningDecileSamplesLinearPredictionNewton(N, race_label, target_frac_recid, decile_0_frac_recid,
+                                                                initial_frac_N):
+    di_frac_map = {}    
+    ddict_list_0, frac_0 = generateDecliningDecileSamplesLinearPrediction(N, race_label,
+                                                                          target_frac_recid,
+                                                                          decile_0_frac_recid,
+                                                                          0,
+                                                                          initial_frac_N)
+    di_frac_map[0] = frac_0
+    offset = 2.0
+    ddict_list, frac_oh = generateDecliningDecileSamplesLinearPrediction(N, race_label,
+                                                                         target_frac_recid,
+                                                                         decile_0_frac_recid,
+                                                                         offset,
+                                                                         initial_frac_N)
+    
+    deriv = (frac_oh - frac_0) / float(offset)
+    offset = 0
+    frac_oh = frac_0
+    best_offset = offset
+    best_frac_oh = frac_0
+    best_ddict_list = ddict_list_0
+    
+    iter = 0
+    while iter < 10:
+        iter += 1
+        last_offset = offset
+        last_frac_oh = frac_oh
+        delta_to_target = last_frac_oh - target_frac_recid 
+        offset = last_offset - delta_to_target / float(deriv)
+        
+        #print('last_offset: ' + str(last_offset) + ' last_frac_oh: ' + str(last_frac_oh) + ' delta_to_target: ' + str(delta_to_target) + ' new_offset: ' + str(offset))
+
+        if di_frac_map.get(offset) != None:
+            break
+        ddict_list, frac_oh = generateDecliningDecileSamplesLinearPrediction(N, race_label,
+                                                                             target_frac_recid,
+                                                                             decile_0_frac_recid,
+                                                                             offset,
+                                                                             initial_frac_N)
+        if abs(target_frac_recid - frac_oh) < abs(target_frac_recid - best_frac_oh):
+            best_frac_oh = frac_oh
+            best_offset = offset
+            best_ddict_list = ddict_list
+        
+        di_frac_map[offset] = frac_oh
+        deriv = (frac_oh - last_frac_oh) / float(offset - last_offset)
+        if abs(deriv) < .00001:
+            break
+
+    print('\ndone at ' + str(iter) + ' best_offset: ' + str(offset) + ' best_frac_oh: ' + str(best_frac_oh))
+
+    plotRecidByDecile(best_ddict_list, 'blue', 'both', 200)
+
+
+    
 
 def f1(precision, recall):
     return 2.0 * precision * recall / (precision + recall)
 
+
+
+
+
+#Generate a synthetic fdict_list of dict key: feature-name value: feature-value
+#with features, 'decile_score' and gl_recidivism_tag.
+#Returns an fdict_list, with number of decile_score and recidivism values set by the lists passed
+# recid_count_by_decile_list is a list of int of length 10, one per decile score
+# norecid_count_by_decile_list is a list of int of length 10, one per decile score
+# multiplier can be > 1 in order to generate descrete fdicts, in case the counts are less than 1.
+def generateSamplesFromRecidNorecidCounts(recid_count_by_decile_list, norecid_count_by_decile_list, multiplier=1):
+    fdict_list = []
+    i_decile_recid = 1
+    for count_recid in recid_count_by_decile_list:
+        for i in range(int(count_recid * multiplier)):
+            fdict = {'decile_score':i_decile_recid,
+                     gl_recidivism_tag: '1'}
+            fdict_list.append(fdict)
+        i_decile_recid += 1            
+
+    i_decile_norecid = 1    
+    for count_norecid in norecid_count_by_decile_list:
+        for i in range(int(count_norecid * multiplier)):
+            fdict = {'decile_score':i_decile_norecid,
+                     gl_recidivism_tag: '0'}
+            fdict_list.append(fdict)
+        i_decile_norecid += 1
+
+    return fdict_list
+
+    
 
 
 #
@@ -642,6 +774,319 @@ gl_features_race = ['race', 'age', 'juv_fel_count', 'juv_misd_count', 'juv_other
 gl_features_min = ['age', 'juv_fel_count', 'juv_misd_count', 'juv_other_count', 'priors_count', 'c_charge_degree', 'c_charge_desc']
 
 
+####################
+#
+#Added material to build and test models on Titanic data.
+#This works with a ddict-list produced by featuresTitanic.py, which does a bit of feature engineering
+#for the Titanic data set.
+#2020/03/21
+#
+
+
+#All possible values of categorical feature are listed.
+#gl_feature_value_listing = OrderedDict([('Pclass', ['1', '2', '3']),                      #0  
+#                                        ('Title', ['Mr', 'Mrs', 'Master', 'Miss', 'Honorific']),  #1
+#                                        ('Sex', ['male', 'female']),                              #2
+#                                        ('AgeCategory', ['lt1', '1', 'lt15', 'lt30', 'lt50', 'ge50']), #3
+#                                        ('FamilySize', ['0', '1', '2', '3-4', 'gt4']),    #4
+#                                        ('FarePerPerson', ['le10', 'le40', 'le100', 'gt100', 'Unknown']),
+#                                        ('Deck', ['A', 'B', 'C', 'D', 'E', 'F', 'T', 'G', 'Unknown']), #6
+#                                        ('EmbarkedFF', ['S', 'C', 'Q', 'Unknown'])])  #7
+#
+#The complete feature set is
+#['PassengerId', 'Survived', 'Pclass', 'Name', 'Sex', 'Age', 'SibSp', 'Parch',
+#'Ticket', 'Fare', 'Cabin', 'Embarked', 'Title', 'AgeCategory', 'FamilySize',
+#'Deck', 'FarePerPerson', 'EmbarkedFF'])
+#
+#Raw features are
+#['PassengerId', 'Survived', 'Pclass', 'Name', 'Sex', 'Age', 'SibSp', 'Parch',
+# 'Ticket', 'Fare', 'Cabin', 'Embarked']
+#
+#These are features to use according to featuresTitanic.py:
+gl_features_titanic = ['Pclass', 'Title', 'Sex', 'AgeCategory', 'FamilySize', 'FarePerPerson', 'Deck', 'EmbarkedFF']
+gl_features_titanic_omit_sex = ['Pclass', 'Title', 'AgeCategory', 'FamilySize', 'FarePerPerson', 'Deck', 'EmbarkedFF']
+
+gl_recidivism_tag_titanic = 'Survived'
+
+
+gl_feature_type_val_listing_map_titanic = {'Pclass': 'scalar',
+                                           'Title': 'scalar',
+                                           'Sex': 'scalar',
+                                           'AgeCategory': 'scalar',
+                                           'FamilySize': 'scalar',
+                                           'FarePerPerson': 'scalar',
+                                           'Deck': 'scalar',
+                                           'EmbarkedFF': 'scalar'}
+
+
+#Make sure to use the feature_list gl_features_titanic in train and test programs
+def setupForDataSet(data_set_name = 'titanic'):
+    global gl_recidivism_tag
+    if data_set_name == 'titanic':
+        gl_recidivism_tag = gl_recidivism_tag_titanic
+        gl_feature_type_val_listing_map.update(gl_feature_type_val_listing_map_titanic)
+    elif data_set_name == 'broward':
+        gl_recidivism_tag = 'two_year_recid'
+        
+
+
+
+def extractTitanicFeatureValueToFloat(key, value):
+    if key == 'Pclass':
+        return getTitanicPclassFeature(value)
+    elif key == 'Title':
+        return getTitanicTitleFeature(value)
+    elif key == 'Sex':
+        return getTitanicSexFeature(value)
+    elif key == 'AgeCategory':
+        return getTitanicAgeCategoryFeature(value)
+    elif key == 'FamilySize':
+        return getTitanicFamilySizeFeature(value)
+    elif key == 'FarePerPerson':
+        return getTitanicFarePerPersonFeature(value)
+    elif key == 'Deck':
+        return getTitanicDeckFeature(value)
+    elif key == 'EmbarkedFF':
+        return getTitanicEmbarkedFFFeature(value)
+    else:
+        print('extractTitanicFeatureValueToFloat() could not interpret key: ' + str(key) + ' value: ' + str(value))
+        return
+
+
+    
+#Note: The titanic features are already categorical due to featuresTitanic.py
+
+##############
+#
+#('Pclass', ['1', '2', '3'])
+#    
+
+gl_titanic_Pclass_feature_map = {'1':0,
+                                 '2':1,
+                                 '3':2}
+
+gl_titanic_Pclass_inverse_feature_map = {0:'1',
+                                         1:'2',
+                                         2:'3'}
+
+def getTitanicPclassFeature(pclass):
+    pclass = str(pclass)
+    pclass_val = gl_titanic_Pclass_feature_map.get(pclass)
+    if pclass_val == None:
+        print('Problem in getTitanicPclassFeature: pclass ' + str(pclass) + ' type ' + str(type(pclass)) + ' is not recognized')
+        return
+    return pclass_val
+    
+#
+#    
+##############
+
+##############
+#
+#('Title', ['Mr', 'Mrs', 'Master', 'Miss', 'Honorific'])
+#    
+
+gl_titanic_Title_feature_map = {'Mr':0,
+                                'Mrs':1,
+                                'Master':2,
+                                'Miss':3,
+                                'Honorific':4}
+
+gl_titanic_Title_inverse_feature_map = {0:'Mr',
+                                        1:'Mrs',
+                                        2:'Master',
+                                        3:'Miss',
+                                        4:'Honorific'}
+
+def getTitanicTitleFeature(title):
+    title_val = gl_titanic_Title_feature_map.get(title)
+    if title_val == None:
+        print('Problem in getTitanicTitleFeature: title ' + title + ' is not recognized')
+        return
+    return title_val
+    
+#
+#    
+##############
+
+##############
+#
+#('Sex', ['male', 'female'])
+#
+
+gl_titanic_Sex_feature_map = {'male':0,
+                              'female':1}
+
+gl_titanic_Sex_inverse_feature_map = {0:'male',
+                                      1:'female'}
+
+def getTitanicSexFeature(sex):
+    sex_val = gl_titanic_Sex_feature_map.get(sex)
+    if sex_val == None:
+        print('Problem in getTitanicSexFeature: sex ' + sex + ' is not recognized')
+        return
+    return sex_val
+    
+#
+#    
+##############
+
+##############
+#
+#('AgeCategory', ['lt1', '1', 'lt15', 'lt30', 'lt50', 'ge50'])
+#
+
+gl_titanic_AgeCategory_feature_map = {'lt1':0,
+                                      '1':1,
+                                      'lt15':2,
+                                      'lt30':3,
+                                      'lt50':4,
+                                      'ge50':5}
+
+gl_titanic_AgeCategory_inverse_feature_map = {0:'lt1',
+                                              1:'1',
+                                              2:'lt15',
+                                              3:'lt30',
+                                              4:'lt50',
+                                              5:'ge50'}
+
+def getTitanicAgeCategoryFeature(age_category):
+    age_category_val = gl_titanic_AgeCategory_feature_map.get(age_category)
+    if age_category_val == None:
+        print('Problem in getTitanicAgeCategoryFeature: age_category ' + age_category + ' is not recognized')
+        return
+    return age_category_val
+    
+#
+#    
+##############
+
+##############
+#
+#('FamilySize', ['0', '1', '2', '3-4', 'gt4'])
+#
+
+gl_titanic_FamilySize_feature_map = {'0':0,
+                                     '1':1,
+                                     '2':2,
+                                     '3-4':3,
+                                     'gt4':4}
+
+gl_titanic_FamilySize_inverse_feature_map = {0:'0',
+                                              1:'1',
+                                              2:'2',
+                                              3:'3-4',
+                                              4:'gt40'}
+
+def getTitanicFamilySizeFeature(family_size):
+    family_size_val = gl_titanic_FamilySize_feature_map.get(family_size)
+    if family_size_val == None:
+        print('Problem in getTitanicFamilySizeFeature: family_size ' + family_size + ' is not recognized')
+        return
+    return family_size_val
+    
+#
+#    
+##############
+
+##############
+#
+#('FarePerPerson', ['le10', 'le40', 'le100', 'gt100', 'Unknown']
+#    
+ 
+gl_titanic_FarePerPerson_feature_map = {'le10':0,
+                                        'le40':1,
+                                        'le100':2,
+                                        'gt100':3,
+                                        'Unknown':4}
+
+gl_titanic_FarePerPerson_inverse_feature_map = {0:'le10',
+                                                1:'le40',
+                                                2:'le100',
+                                                3:'gt100',
+                                                4:'Unknown'}
+
+def getTitanicFarePerPersonFeature(fare_per_person):
+    fare_per_person_val = gl_titanic_FarePerPerson_feature_map.get(fare_per_person)
+    if fare_per_person_val == None:
+        print('Problem in getTitanicFarePerPersonFeature: fare_per_person ' + fare_per_person + ' is not recognized')
+        return
+    return fare_per_person_val
+    
+#
+#    
+##############
+
+##############
+#
+#('Deck', ['A', 'B', 'C', 'D', 'E', 'F', 'T', 'G', 'Unknown'])
+#
+
+gl_titanic_Deck_feature_map = {'A':0,
+                               'B':1,
+                               'C':2,
+                               'D':3,
+                               'E':4,
+                               'F':5,
+                               'T':6,
+                               'G':7,
+                               'Unknown':8}
+
+gl_titanic_Deck_inverse_feature_map = {0:'A',
+                                       1:'B',
+                                       2:'C',
+                                       3:'D',
+                                       4:'E',
+                                       5:'F',
+                                       6:'T',
+                                       7:'G',
+                                       8:'Unknown'}
+
+def getTitanicDeckFeature(deck):
+    deck_val = gl_titanic_Deck_feature_map.get(deck)
+    if deck_val == None:
+        print('Problem in getTitanicDeckFeature: deck ' + deck + ' is not recognized')
+        return
+    return deck_val
+    
+#
+#    
+##############
+
+##############
+#
+#('EmbarkedFF', ['S', 'C', 'Q', 'Unknown'])])
+#
+
+gl_titanic_EmbarkedFF_feature_map = {'S':0,
+                                      'C':1,
+                                      'Q':2,
+                                      'Unknown':3}
+
+gl_titanic_EmbarkedFF_inverse_feature_map = {0:'S',
+                                              1:'C',
+                                              2:'Q',
+                                              3:'Unknown'}
+
+
+def getTitanicEmbarkedFFFeature(embarkedff):
+    embarkedff_val = gl_titanic_EmbarkedFF_feature_map.get(embarkedff)
+    if embarkedff_val == None:
+        print('Problem in getTitanicEmbarkedFFFeature: embarkedff ' + embarkedff + ' is not recognized')
+        return
+    return embarkedff_val
+    
+#
+#    
+##############
+#                                       
+#################### Titanic
+
+
+####################
+#
+#Broward and general
+#
 
 
 
@@ -695,6 +1140,9 @@ def convertDdictsToFeatureVectorsAndGT(ddict_list, feature_list=gl_features_min)
         x_np = np.array(x_list, dtype = np.float32)
         X_array.append(x_np)
         recid = ddict.get(gl_recidivism_tag)    # '0' or '1'
+        if recid == None:
+            print('Problem in convertDdictsToFeatureVectorsAndGT(), recid is None for gl_recidivism_tag: ' + gl_recidivism_tag)
+            return
         y = float(recid)                 #0=norecid, 1=recid 
         y_array.append(y)
 
@@ -763,28 +1211,32 @@ def extractDDictsAsFeatures(ddict_list, feature_list=gl_features_min):
         for key in feature_list:
             if key == 'age':
                 fdict['age'] = getAgeFeature(ddict.get('age'))
-            if key == 'juv_fel_count':
+            elif key == 'juv_fel_count':
                 fdict['juv_fel_count'] = getJuvFelCountFeature(ddict.get('juv_fel_count'))
-            if key == 'juv_misd_count':
+            elif key == 'juv_misd_count':
                 fdict['juv_misd_count'] = getJuvMisdCountFeature(ddict.get('juv_misd_count'))
-            if key == 'juv_other_count':
+            elif key == 'juv_other_count':
                 fdict['juv_other_count'] = getJuvOtherCountFeature(ddict.get('juv_other_count'))
-            if key == 'priors_count':
+            elif key == 'priors_count':
                 fdict['priors_count'] = getPriorsCountFeature(ddict.get('priors_count'))
-            if key == 'c_charge_desc':
-                fdict['c_charge_desc'] = getCChargeDescFeature(ddict.get('c_charge_desc'))
-            if key == 'race':
+            elif key == 'c_charge_desc':
+                fdict['c_charge_desc'] = getCChargeDescFeatureVector(ddict.get('c_charge_desc'))
+            elif key == 'race':
                 fdict['race'] = getRaceDescFeature(ddict.get('race'))
-            if key == 'sex':
-                if ddict['sex'] == 'Male':
+            elif key == 'sex':
+                if ddict['sex'] in ('Male', 'male'):
                     fdict['sex'] = 0                 #male
                 else:
                     fdict['sex'] = 1                 #female
-            if key == 'c_charge_degree':
+            elif key == 'c_charge_degree':
                 if ddict['c_charge_degree'] == 'M': 
                     fdict['c_charge_degree'] = 0     #misdemeanor
                 else:
                     fdict['c_charge_degree'] = 1     #felony
+            #not the best way to do this...
+            elif feature_list in (gl_features_titanic, gl_features_titanic_omit_sex):
+                float_val = extractTitanicFeatureValueToFloat(key, ddict.get(key))
+                fdict[key] = float_val
         fdict_list.append(fdict)
     return fdict_list
 
@@ -977,7 +1429,7 @@ def getPriorsCountFeature(priors_count):
 
 #Returns an array of float
 #This looks up the val_ar returned from gl_charge_desc_map
-def getCChargeDescFeature(c_charge_desc):
+def getCChargeDescFeatureVector(c_charge_desc):
     val_ar = gl_charge_desc_map.get(c_charge_desc)
     if val_ar == None:
         val_ar = gl_charge_desc_map.get('other')
@@ -992,8 +1444,40 @@ try:
                                 #value str charge_descr
 except:
     gl_charge_desc_map = None
-    gl_charge_index_desc_map = None    
-        
+    gl_charge_index_desc_map = None
+
+
+#charge_desc_feature_vector is an array of float
+#0 is an average recidivism rate for the selected charge description.
+#The remainder of the vector is one-hot.
+#This function finds which of the indices is 1, and looks up the name of the
+#corresponding charge description.
+#Returns a str
+def getCChargeDescNameFromCChargeDescFeatureVector(charge_desc_feature_vector):
+    index = None
+    for i in range(1, len(charge_desc_feature_vector)):
+        if charge_desc_feature_vector[i] == 1:
+            index = i
+            break
+    if index == None:
+        print('could not find a 1 in the one-hot vector')
+        return
+    charge_desc_name = gl_charge_index_desc_map.get(i)
+    return charge_desc_name
+
+#charge_desc_feature_vector is an array of float
+#0 is an average recidivism rate for the selected charge description.
+#The remainder of the vector is one-hot.
+#This function finds which of the indices is 1, and returns that.
+def getCChargeDescIndexFromCChargeDescFeatureVector(charge_desc_feature_vector):
+    index = None
+    for i in range(1, len(charge_desc_feature_vector)):
+        if charge_desc_feature_vector[i] == 1:
+            index = i
+            return index
+
+
+
 
 #Minimum number of charge incidents for the charge description to be accepted
 #as a feature spot in a one-hot array of charge description values.
@@ -1077,7 +1561,6 @@ def computeConsolidatedChargeDescTally(ddict_list):
 
 
 
-
 gl_drug_name_set = set(['cocaine', 'cannabis', 'methylenedioxymethcath', 'alprazolam', 'pyrrolidinovalerophenone',
                         'methamphetamine', 'heroin', 'oxycodone', 'contr', 'contraband', 'schedule', 'narcotic',
                         'narcotics', 'drug', 'methylenediox', 'hydromorphone', 'hydrocodone', 'mdma', 'ecstasy',
@@ -1108,7 +1591,113 @@ def getNameInvolvesDrugs(name):
         if token in gl_drug_name_set:
             return True
     return False
+
+
+
+
+#For each charge description feature, tally the breakdown by race.
+#fdict_list is a list of dict: key: feature_name, value: feature_value,
+#which has been processed from raw features ddict_list by
+#convertDdictsToFeatureVectorsAndGT()
+#fdict_list should include a 'race' feature
+#the value of the 'c_charge_desc' feature 
+# 
+def assessChargeDescFeatureDistributionByRace(fdict_list, tol = .2):
+    charge_desc_race_tally_map = {} #key: str charge-description
+                                     #value: list of int, count, indexed by race index in
+                                     #gl_race_feature_map
+    for fdict in fdict_list:
+        charge_desc_feature_vector = fdict.get('c_charge_desc')
+        charge_desc_index = getCChargeDescIndexFromCChargeDescFeatureVector(charge_desc_feature_vector)
+        if charge_desc_index == None:
+            print('problem: charge_desc_index is None for fdict')
+            return fdict
+        race_index = fdict.get('race')
+        if race_index == None:
+            print('problem: race_index is None for fdict')
+            return fdict
+
+        if charge_desc_race_tally_map.get(charge_desc_index) == None:
+            charge_desc_race_tally_map[charge_desc_index] = [0] * len(gl_race_feature_map)
+        charge_desc_race_tally_map[charge_desc_index][race_index] += 1
+
+    displayChargeDescrDistributionByRace(charge_desc_race_tally_map)
+
+
+    outlier_charge_stats_tally_map = identifyOutlierChargeDescItem(fdict_list, charge_desc_race_tally_map, tol)
+    print('\n\noutliers: ' + str(len(outlier_charge_stats_tally_map)))
+    displayChargeDescrDistributionByRace(outlier_charge_stats_tally_map)
+    return outlier_charge_stats_tally_map
+
+
+#Run through the dictionary of charge descriptions and count breakdowns by race
+#Pull out the ones that have a fraction of +/- frac_tolerance for either
+#'African-American' or 'Caucasian', with respect to fraction of that race
+#in the population
+#fdict_list is a dict key: feature-name value: feature-value
+#charge_desc_race_tally_map is a dict:  key:   int charge_desc_index
+#                                       value: list of int count, indexed by race_index
+#returns a subset of the charge_desc_race_tally_map passed
+def identifyOutlierChargeDescItem(fdict_list, charge_desc_race_tally_map, tol = .2):
+    cau_count = 0
+    aa_count = 0
+    for fdict in fdict_list:
+        if fdict.get('race') == gl_race_feature_map.get('African-American'):
+            aa_count += 1
+        elif fdict.get('race') == gl_race_feature_map.get('Caucasian'):
+            cau_count += 1
+    overall_aa_frac = float(aa_count)/len(fdict_list)
+    overall_cau_frac = float(cau_count)/len(fdict_list)
+    print('overall_aa_frac: ' + str(overall_aa_frac))
+    print('overall_cau_frac: ' + str(overall_cau_frac))
+
+    outlier_charge_desc_race_tally_map = {}
+
+    for charge_index in charge_desc_race_tally_map:
+        race_distr = charge_desc_race_tally_map.get(charge_index)
+        count_sum = float(sum(race_distr))
+        aa_frac = race_distr[gl_race_feature_map.get('African-American')] / count_sum
+        cau_frac = race_distr[gl_race_feature_map.get('Caucasian')] / count_sum
+        if abs(aa_frac - overall_aa_frac) > tol or\
+           abs(cau_frac - overall_cau_frac) > tol:
+            #if abs(aa_frac - overall_aa_frac) > tol:
+            #    print('outlier aa_frac: ' + str(aa_frac) + ' overall: ' + str(overall_aa_frac) + ' absdiff: ' + str(abs(aa_frac-overall_aa_frac)))
+            #if abs(cau_frac - overall_cau_frac) > tol:
+            #    print('outlier cau_frac: ' + str(cau_frac) + ' overall: ' + str(overall_cau_frac) + ' absdiff: ' + str(abs(cau_frac-overall_cau_frac)))
+            outlier_charge_desc_race_tally_map[charge_index] = race_distr
+    return outlier_charge_desc_race_tally_map
+        
+
+
+def displayChargeDescrDistributionByRace(charge_desc_race_tally_map):
+    charge_index_list = list(charge_desc_race_tally_map.keys())
+    charge_index_list.sort()
+    aa_cau_race_index_list = []
+    aa_cau_race_index_list.append(gl_race_feature_map.get('African-American'))
+    aa_cau_race_index_list.append(gl_race_feature_map.get('Caucasian'))
+    for charge_index in charge_index_list:
+        charge_name = gl_charge_index_desc_map.get(charge_index)
+
+        race_distr = charge_desc_race_tally_map.get(charge_index)
+        if race_distr == None:
+            print('blank: ' + str(charge_index))
+            continue
+        count_sum = sum(race_distr)
+        ratio_distr = []
+        race_count_str = ''
+        ratio_distr_str = ''
+        #for i_race in range(len(race_distr)):
+        for i_race in aa_cau_race_index_list:
+            ratio = float(race_distr[i_race]) / count_sum
+            race_count_str += '{:4}'.format(race_distr[i_race])
+            ratio_distr_str += '  {:.2f}'.format(ratio)
+            
+        print(str(charge_index) + '  {:50}'.format(charge_name) + ' ' + race_count_str + '   ' + ratio_distr_str)
     
+
+#
+#
+#################### Broward
 #
 ############################
 
@@ -1258,10 +1847,6 @@ def trainGBR(X_train, y_train, n_estimators=None, max_depth=None, max_features=N
     return gbr
 
 
-#def testGBR(X_test, gbr):
-#    return gbr.predict(X_test)
-
-
     
 #
 #
@@ -1274,12 +1859,21 @@ def trainGBR(X_train, y_train, n_estimators=None, max_depth=None, max_features=N
 #
 
 
-def trainLR(X_train, y_train, n_estimators=None, max_depth=None, max_features=None, subsample=None):
-    linr = LinearRegression(normalize = True)
+def trainLR(X_train, y_train, scale=False):
 
-    linr.fit(X_train, y_train)
+    #linr = LinearRegression(normalize = True)
 
-    return linr
+    linr = LinearRegression()    
+    if scale:
+        scaler = preprocessing.StandardScaler()  #with_std=False)
+        global gl_last_scaler
+        gl_last_scaler = scaler
+        linr_pipeline = make_pipeline(scaler, linr)
+        linr_pipeline.fit(X_train, y_train)
+        return linr_pipeline                
+    else:
+        linr.fit(X_train, y_train)
+        return linr
 
     
 #
@@ -1294,7 +1888,7 @@ def trainLR(X_train, y_train, n_estimators=None, max_depth=None, max_features=No
 
 
     
-def trainLogR(X_train, y_train, n_estimators=None, max_depth=None, max_features=None, subsample=None):
+def trainLogR(X_train, y_train):
     global gl_last_scaler
 
     #print('in trainLogR')
@@ -1322,7 +1916,7 @@ def trainLogR(X_train, y_train, n_estimators=None, max_depth=None, max_features=
     
 def testModel(X_test, model):
     if str(type(model)) == "<class 'sklearn.pipeline.Pipeline'>":
-        if model.steps[1][0] == 'logisticregression':
+        if len(model.steps) > 1 and model.steps[1][0] == 'logisticregression':
             probs_ar = model.predict_proba(X_test)
             prob_1_ar = [item[1] for item in probs_ar]
             #print('min_prob: ' + str(min(prob_1_ar)))
@@ -1337,17 +1931,19 @@ def testModel(X_test, model):
 
 ############################
 #
-#Plotting for a GBR or Linear model
+#Plotting for a GBR or Logistic or Linear model
 #
 
 
 #For plotting regressor prediction scores.
-#If the training data ranges from 0.0 to 2.0, then these bounds give room for
+#If the training data ranges from 0.0 to 1.0, then these bounds give room for
 #predictions below and above these values.
-gl_score_plot_range_min = -.25
-gl_score_plot_range_max = 1.25
-
-
+#Often though we reset these to 0.0 and 1.0.
+try:
+    gl_score_plot_range_min
+except:
+    gl_score_plot_range_min = -.25
+    gl_score_plot_range_max = 1.25
 
 
 
@@ -1431,6 +2027,40 @@ def plotPredictionScores(y, pred_scores, ratio_color=None, ymax = 700, show_plot
     plt.show()
     
 
+
+#returns a list of list of int [pos_counts, neg_counts]
+def predictionScoresToHistArrays(y, pred_scores, n_bins=20):
+    if len(y) != len(pred_scores):
+        print('y count ' + str(len(y)) + ' != pred_scores count ' + str(len(pred_scores)))
+        return
+
+    range_min = gl_score_plot_range_min
+    range_max = gl_score_plot_range_max
+    the_range = range_max - range_min
+    #n_bins = 20    
+    #n_bins = 30    
+    #n_bins = 40
+    #n_bins = 50
+    #n_bins = 60
+    #n_bins = 100
+    hist_arrays = []
+    for i in range(2):
+        hist_arrays.append([0] * n_bins)
+
+    for i in range(len(y)):
+        y_i = y[i]
+        y_index = int(y_i)       #0 = norecid, 1 = recid
+        hist_array = hist_arrays[y_index]  #which hist_array to add this count to, recid or norecid
+        pred = pred_scores[i]
+        hist_index = int(max(0.0, min(1.0, (pred - range_min)/the_range)) * n_bins)
+        hist_index = max(0, min(n_bins-1, hist_index))
+        hist_array[hist_index] += 1
+
+    hist_arrays.reverse()  #because we stuffed them [neg_counts, pos_counts] 
+    return hist_arrays
+
+        
+    
 
 
 #y is a list of float groundtruth recidivism,  0.0 = norecid, 1.0 = recid
@@ -1777,12 +2407,12 @@ import eli5
 #C:\Python36x64\lib\site-packages\sklearn\utils\deprecation.py:144: FutureWarning: The sklearn.feature_selection.base module is  deprecated in version 0.22 and will be removed in version 0.24. The corresponding classes / functions should instead be imported from sklearn.feature_selection. Anything that cannot be imported from sklearn.feature_selection is now part of the private API.
 
 
-def explainGlobalFeatureWeights_ELI5(gbr, feature_name_value_reverse_map):
+
+def explainGBRGlobalFeatureWeights_ELI5(gbr, feature_name_value_reverse_map):
     global gl_weights_explain_eli5
     gl_weights_explain_eli5 = eli5.explain_weights(gbr, top=1000)   #, top=1000)
     weights_explain_dict = eli5.formatters.format_as_dict(gl_weights_explain_eli5)
     importances_list = weights_explain_dict.get('feature_importances').get('importances')
-
     feature_name_value_importance_list = []  #(feature_name, feature_value, importance)
     for item in importances_list:  #item is a dict: {feature: 'Column_92', 'weight': .33, ...}
         col_name = item.get('feature')
@@ -1799,6 +2429,84 @@ def explainGlobalFeatureWeights_ELI5(gbr, feature_name_value_reverse_map):
         feature_name_value = item[0]
         weight = item[1]
         print('{:50}'.format(feature_name_value) + '   {:.3f}'.format(weight))
+
+
+#for Logistic Regresssion
+def explainLogRGlobalFeatureWeights_ELI5(model, feature_name_value_reverse_map):
+    global gl_weights_explain_eli5
+    gl_weights_explain_eli5 = eli5.explain_weights(model, top=1000)   #, top=1000)
+    weights_explain_dict = eli5.formatters.format_as_dict(gl_weights_explain_eli5)
+    
+    #if str(type(model)) == "<class 'sklearn.pipeline.Pipeline'>":
+    #   model.steps[1][0] == 'logisticregression':
+    #    feature_weights_dict = weights_explain_dict.get('targets')[0].get('feature_weights')
+    #elif str(type(model)) == "<class 'sklearn.pipeline.Pipeline'>" and \
+    #   model.steps[1][0] == 'linearregression':
+    #    feature_weights_dict = weights_explain_dict.get('targets')[0].get('feature_weights')
+    #else:
+    #    print('did not see this as a logisticregression pipeline')
+    #    return
+
+    feature_weights_dict = weights_explain_dict.get('targets')[0].get('feature_weights')
+    
+    #print('\nPOS')
+    importances_list = feature_weights_dict.get('pos')
+    feature_name_value_importance_list = []  #(feature_name, feature_value, importance)
+    for item in importances_list:  #item is a dict: {feature: 'Column_92', 'weight': .33, ...}
+        col_name = item.get('feature')
+        if col_name == '<BIAS>':
+            feature_name_value = 'BIAS'
+        else:
+            col_index = int(col_name[len('x'):])
+            feature_name_value = feature_name_value_reverse_map.get(col_index)
+            if feature_name_value == None:
+                print('problem: no feature_name_value found for col_index: ' + str(col_index))
+                return
+        weight = item.get('weight')
+        feature_name_value_importance_list.append((feature_name_value, weight))
+
+    #feature_name_value_importance_list.sort(key = lambda x: x[1], reverse=True)
+    #for item in feature_name_value_importance_list:
+    #    feature_name_value = item[0]
+    #    weight = item[1]
+    #    print('{:50}'.format(feature_name_value) + '   {:.3f}'.format(weight))
+
+    #print('\nNEG')
+    importances_list = feature_weights_dict.get('neg')
+    global gl_importances_list
+    gl_importances_list = importances_list
+    #feature_name_value_importance_list = []  #(feature_name, feature_value, importance)
+    for item in importances_list:  #item is a dict: {feature: 'Column_92', 'weight': .33, ...}
+        col_name = item.get('feature')
+        if col_name == '<BIAS>':
+            feature_name_value = 'BIAS'
+        else:
+            col_index = int(col_name[len('x'):])
+            feature_name_value = feature_name_value_reverse_map.get(col_index)
+            if feature_name_value == None:
+                print('problem: no feature_name_value found for col_index: ' + str(col_index))
+                return
+        weight = item.get('weight')
+        feature_name_value_importance_list.append((feature_name_value, weight))
+
+    #feature_name_value_importance_list.sort(key = lambda x: x[1], reverse=True)
+    #for item in feature_name_value_importance_list:
+    #    feature_name_value = item[0]
+    #    weight = item[1]
+    #    print('{:50}'.format(feature_name_value) + '   {:.3f}'.format(weight))
+
+
+    feature_name_value_importance_list.sort(key = lambda x: abs(x[1]), reverse=True)
+    for item in feature_name_value_importance_list:
+        feature_name_value = item[0]
+        weight = item[1]
+        print('{:50}'.format(feature_name_value) + '   {:.3f}'.format(weight))        
+        
+
+
+
+        
+        
     
 
 
@@ -1919,6 +2627,100 @@ def testFeatureContributionsToPrediction_SelectMostImportantFeatures_ELI5(gbr, d
 #
 ################################################################################
 
+
+################################################################################
+#
+#Exporting predictions and outcomes as .json files to display and explore using
+#the PCDM Dashboard (Prediction Distribution Confusion Matrix).
+#
+
+#File format:
+#{ 'data-set-name': '<data set name>',
+#  'notes': '<notes',
+#  'data-slices':
+#     {'<slice-name>':
+#         {'pos-outcomes': [34, 33, 22, ...],
+#          'neg-outcomes': [4, 3, 2, ...]
+#     }
+#}
+#
+#The arrays of ints are counts per bin (e.g. decile bin) for number of condition-positive
+#and condition-negative outcomes.  All count arrays in the file must be the same length
+#under the assumption that a common model is used to generate all distributions.
+#The data slices should include one called 'all-data'.
+#
+#For example, the Broward Recidivism data might include several .json files corresponding
+#to different models.  One model will be the observed COMPAS decile predictions, then
+#other models might be Logistic Regression models trained on various feature sets, such
+#as gl_features_min (omitting sex and race) and gl_features_max (including sex and race).
+#
+#Each data file will contain a data slice called 'all-data' corresponding to the full
+#population of data samples.  Then, it can contain breakdowns of the full population
+#such as 'African-American' and 'Caucasian'.
+
+
+
+gl_broward_compas_notes = ''
+
+
+
+
+
+#This applies to predictions from COMPAS because it looks specifically for decile_score
+#slice_spec_list is a list or tuple of tuple string specifying sectors for the data set.
+#Each tuple is a field-name-value-list which is a list of tuple, (str field_name, str comp, str or int field_value, slice_name)
+#that must be true for the field to be included in the result
+#e.g. ('das_b_screening_arrest', '<=', 30)
+#This function prepends 'all-data' to slice_spec_list.
+#Example:   ('race', '==', 'Asian')
+def writeCOMPASPredictionsToJSONFile(ddict_list, json_filepath, nickname, display_name, notes, 
+                                     slice_spec_list = None, overwrite_existing_file_p=False):
+
+
+    if os.path.exists(json_filepath):
+        if not overwrite_existing_file_p:
+            print('filepath ' + json_filepath + ' already exists, not overwriting')            
+            return;
+        print('filepath ' + json_filepath + ' already exists, overwriting with a new file')
+
+    json_dict = {'data-set-nickname': nickname,
+                 'data-set-display-name': display_name, 
+                 'notes': notes,
+                 'data-slices': {}
+                 }
+
+    recid_list = filterDdict(ddict_list, [(gl_recidivism_tag, '==', '1')])
+    recid_hist = buildHistByDecile(recid_list)
+    norecid_list = filterDdict(ddict_list, [(gl_recidivism_tag, '==', '0')])
+    norecid_hist = buildHistByDecile(norecid_list)
+    json_dict['data-slices']['all-data'] = {'pos-outcomes': recid_hist,
+                                            'neg-outcomes': norecid_hist}
+
+    if slice_spec_list == None:
+        slice_spec_list = []
+    for slice_spec in slice_spec_list:
+        if len(slice_spec) > 3:
+            slice_name = slice_spec[3]
+        else:
+            slice_name = slice_spec[2]
+        ddict_list_slice = filterDdict(ddict_list, [slice_spec])
+        recid_list = filterDdict(ddict_list_slice, [(gl_recidivism_tag, '==', '1')])
+        recid_hist = buildHistByDecile(recid_list)
+        norecid_list = filterDdict(ddict_list_slice, [(gl_recidivism_tag, '==', '0')])
+        norecid_hist = buildHistByDecile(norecid_list)
+        json_dict['data-slices'][slice_name] = {'pos-outcomes': recid_hist,
+                                                'neg-outcomes': norecid_hist}
+        
+
+    with open(json_filepath, 'w') as file:
+        json.dump(json_dict, file, indent=4)
+
+
+
+
+#
+#
+################################################################################
 
 ################################################################################
 #
@@ -2063,7 +2865,7 @@ def runTrainTestKFold(ddict_list, feature_list = gl_features_min, score_threshol
 
     #print('preds: ' + str(preds))
 
-    roc = buildROCCurveFromPredictionScores(y, preds)        
+    roc = buildROCCurveFromPredictionScores(y, preds)
     if score_threshold == None:
         #score_threshold, f1 = chooseOptimalF1Score(y, preds)
         #print('choosing score_threshold: ' + str(score_threshold) + ' for optimal f1 score: ' + str(f1))
@@ -2290,7 +3092,116 @@ def runTrainTestFull_SelectRace(ddict_list, target_race, feature_list = gl_featu
 
 
 
+
+
+#run the model on ddict_list including 'all-data' and the slices specified in slice_spec_list.
+#write as a json file that can be imported into the PDCM Dashboard (Prediction Distribution Confusion Matrix)
+def runModelWriteHistArraysToJSONFile(ddict_list, model, json_filepath, data_set_name, display_name, notes,
+                                      feature_list = gl_features_min,
+                                      num_bins=20,
+                                      slice_spec_list = None,
+                                      overwrite_existing_file_p=False):
+    if os.path.exists(json_filepath):
+        if not overwrite_existing_file_p:
+            print('filepath ' + json_filepath + ' already exists, not overwriting')            
+            return;
+        print('filepath ' + json_filepath + ' already exists, overwriting with a new file')
+
+    json_dict = {'data-set-nickname': data_set_name,
+                 'data-set-display-name': display_name, 
+                 'notes': notes,
+                 'data-slices': {}
+                 }
+
+    X, y, rev_map = convertDdictsToFeatureVectorsAndGT(ddict_list, feature_list)
+    preds = testModel(X, model)
+    hist_arrays = predictionScoresToHistArrays(y, preds, num_bins)
+    recid_hist = hist_arrays[0]
+    norecid_hist = hist_arrays[1]
+    json_dict['data-slices']['all-data'] = {'pos-outcomes': recid_hist,
+                                            'neg-outcomes': norecid_hist}
+    if slice_spec_list == None:
+        slice_spec_list = []
+    for slice_spec in slice_spec_list:
+        if len(slice_spec) > 3:
+            slice_name = slice_spec[3]
+        else:
+            slice_name = slice_spec[2]
+        ddict_list_slice = filterDdict(ddict_list, [slice_spec])
+        X, y, rev_map = convertDdictsToFeatureVectorsAndGT(ddict_list_slice, feature_list)
+        preds = testModel(X, model)
+        hist_arrays = predictionScoresToHistArrays(y, preds, num_bins)
+        recid_hist = hist_arrays[0]
+        norecid_hist = hist_arrays[1]
+        json_dict['data-slices'][slice_name] = {'pos-outcomes': recid_hist,
+                                                'neg-outcomes': norecid_hist}
+    with open(json_filepath, 'w') as file:
+        json.dump(json_dict, file, indent=4)
+        
+
+
+
+        
+
+#Take a set of groundtruth observations y and predictions y_preds and write to a JSON file.
+#This is used for example if KFold cross validation is used to produce a set of GBR models
+#that were used to produce KFold predictions.
+#
+#After running runTrainTestKFold(ddict_list2, ...
+#call as 
+#>>> ca.writeModelPredictionsToJSONFile(gl_last_y, gl_last_preds, ddict_list2, json_filepath, data_set_name, display_name,
+#                                       notes, [('race', '==', 'African American')('race', '==', 'Caucasian')], True)
+def writeModelPredictionsToJSONFile(y, preds, ddict_list, json_filepath, data_set_name, display_name, notes, num_bins=20,
+                                    slice_spec_list = None, overwrite_existing_file_p=False):
+    if os.path.exists(json_filepath):
+        if not overwrite_existing_file_p:
+            print('filepath ' + json_filepath + ' already exists, not overwriting')            
+            return;
+        print('filepath ' + json_filepath + ' already exists, overwriting with a new file')
+
+    json_dict = {'data-set-nickname': data_set_name,
+                 'data-set-display-name': display_name, 
+                 'notes': notes,
+                 'data-slices': {}
+                 }
+
+    ddict_index_map = {}   #key: ddict  value: int index in ddict_list
+    for index in range(len(ddict_list)):
+        ddict = ddict_list[index]
+        ddict['index'] = index;
+    
+    hist_arrays = predictionScoresToHistArrays(y, preds, num_bins)
+    pos_hist = hist_arrays[0]
+    neg_hist = hist_arrays[1]
+    json_dict['data-slices']['all-data'] = {'pos-outcomes': pos_hist,
+                                            'neg-outcomes': neg_hist}
+    if slice_spec_list == None:
+        slice_spec_list = []
+    for slice_spec in slice_spec_list:
+        if len(slice_spec) > 3:
+            slice_name = slice_spec[3]
+        else:
+            slice_name = slice_spec[2]
+        ddict_list_slice = filterDdict(ddict_list, [slice_spec])
+        y_slice = []
+        preds_slice = []
+        for ddict in ddict_list_slice:
+            index = ddict.get('index')
+            y_slice.append(y[index])
+            preds_slice.append(preds[index])
+        
+        hist_arrays = predictionScoresToHistArrays(y_slice, preds_slice, num_bins)
+        pos_hist = hist_arrays[0]
+        neg_hist = hist_arrays[1]
+        json_dict['data-slices'][slice_name] = {'pos-outcomes': pos_hist,
+                                                'neg-outcomes': neg_hist}
+    with open(json_filepath, 'w') as file:
+        json.dump(json_dict, file, indent=4)
+        
+
+
 #
 #
 ################################################################################
+
 
