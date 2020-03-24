@@ -2,6 +2,12 @@
 
 #appleSnacks.py is for generating synthetic example data sets to explore what
 #algorithmic bias looks like in a Confusion Matrix.
+#Export data sets to .json for viewing in the Confusion Matrix Dashboard.
+#This module also contains development for the PPRS (Positive Prediction Ratio Score).
+#
+#Eric Saund
+#March, 2020
+#
 
 import random
 import json
@@ -14,30 +20,23 @@ import scipy.special as sp
 
 
 
-#map from feature values to ways of assigning a score
-#If 'float', then sample values from a gaussian distribution using the means and std dev in
-#gl_feature_dist_map.
-#If a list, then sample values according to the fractions in gl_feature_dist_map.
-gl_feature_val_to_score_maps = {'age': 'float',
-                                'teacher':(('Ms. Popcorn', 0.0), ('Miss Fruitdale', 1.0), ('Mr. Applebaum', 2.0)),
-                                'height': 'float',
-                                'pet':(('turtle', 0.0), ('fish', 1.0), ('cat', 2.0), ('dog', 3.0))}
+################################################################################
+#
+#Generator Distributions
+#
 
-gl_feature_weight_map = {'age': 1.0, 'teacher': 1.0, 'height': 1.0, 'pet':1.0}
-
-
-#For each feature, we can have either a normal distribution ['normal', mean, std-dev, min, max]
-#or else a distribution with probalities indicated:  ['dist', p1, p2, ...]
-
-#linear spec is (min_val, max_val, min_frac)
-#min_frac can range from 0.0 to 2.0.  1.0 means uniform
-
-
+#For each feature, we can have either a continuous generator distribution, e.g. ['normal', mean, std-dev, min, max],
+#or else a categorical distribution with probalities indicated:  ['dist', p1, p2, ...].
+#In this module, a generator distribution is called a "feature_dist_map".
+#
+#Generator Distribution types:
+#
 #normal spec arguments:   [mean, stddev, min, max]
 #uniform spec arguments:   [min, max]
 #linear spec arguments:   [min, max, min_val_frac]   min_val_frac ranges from 0 to 2.0
 #triangular spec arguments:   [min, mode, max]
 #categorical spec arguments:   [ frac1, frac2, ...]   where the fracs sum to 1.0.
+
 
 
 #Equal distribution of all feature values for girls and boys.
@@ -411,8 +410,15 @@ gl_feature_dist_map_uniform_bias_sex = \
     }
 
 
+#
+#
+################################################################################
 
 
+################################################################################
+#
+#Generating samples from generator distributions
+#
 
 
 gl_feature_dist_map = gl_feature_dist_map_uniform
@@ -878,8 +884,9 @@ def generateAllDistributionsTemp(n_kids = 100000, n_bins=20):
     
 
 
-    
-
+#
+#
+################################################################################
 
 ################################################################################
 #
@@ -889,6 +896,8 @@ def generateAllDistributionsTemp(n_kids = 100000, n_bins=20):
 
 #The slice specs are of the form ('<feature-name>', '<comparator>', '<feature-value-name>')
 #The two slice specs pick out two subsets of the data in dist_list to compare.
+#These will be usually be something like ('sex', '==', 'girl') and ('sex', '==', 'boy')
+#This uses a quick and dirty smoothing of PPR curves.
 def computePosPredictionRatioScore(ddict_list, slice_spec_1, slice_spec_2, outcome_tag_tup = ('apple', 'other'),
                                    num_bins = None, plot_p = False):
 
@@ -993,6 +1002,7 @@ def computePosPredictionRatioScore(ddict_list, slice_spec_1, slice_spec_2, outco
     return pprs * 100.0, ave_binom_max
 
 
+#Test the PPRS on a selection of generator distributions.
 def computePPRSOnKids(n_kids, n_bins):
     
     kdict_list_uniform = generateAppleSnackSamples(n_kids, n_bins, gl_feature_dist_map_uniform)
@@ -1022,11 +1032,10 @@ def computePPRSOnKids(n_kids, n_bins):
     print('bias_sex: ' + str(pprs_bs) + ' ave_binom_max: ' + str(abm_bs))
     print('opposite_bias_girls: ' + str(pprs_obg) + ' ave_binom_max: ' + str(abm_obg))
         
-        
-    
 
 
-
+#Compute PPRS on on generator distribution.
+#Defaults to the uniform generator distribution.
 def computePPRSOnKids1(n_kids, n_bins, feature_dist_map = None, plot_p=True):
     if feature_dist_map == None:
         feature_dist_map = gl_feature_dist_map_uniform
@@ -1036,9 +1045,12 @@ def computePPRSOnKids1(n_kids, n_bins, feature_dist_map = None, plot_p=True):
     print('pprs: ' + str(pprs_u))
 
 
+#A list of generator distributions to make it convenient to test PPRS on one of them.
 gl_feature_dist_map_list = [gl_feature_dist_map_uniform, gl_feature_dist_map_skewed_same, gl_feature_dist_map_skewed_opposite, gl_feature_dist_map_uniform_bias_sex, gl_feature_dist_map_skewed_opposite_bias_girls]
 
-    
+
+#Compute PPRS on the generator distribution passed as feature_dist_map, or else if
+#feature_dist_map is an int i, on the ith generator distribution in gl_feature_dist_map_list.
 def computePPRSOnKidsN(n_kids, num_bins, feature_dist_map = None, plot_p=True):
     if type(feature_dist_map) is int:
         feature_dist_map = gl_feature_dist_map_list[feature_dist_map]
@@ -1050,7 +1062,17 @@ def computePPRSOnKidsN(n_kids, num_bins, feature_dist_map = None, plot_p=True):
     print('pprs: ' + str(pprs_u))
 
     
-    
+
+
+#I experimented with a cross-binomial approach.
+#This is to caculate the probability that an observed number of positive outcomes would occur in
+#a bin of one subpopulation, given the probability of positive outcome obtained by the other subpopulation.
+#Use the binomial distribution. This is theoretically a better way to measure the difference between
+#Positive Predition Ratio curves.  I didn't find the results to be any better in practice than
+#simply weighted squared difference of ratios.   Really, the right thing to do is to get a good statistical
+#estimate of the PPR curves using a smoothness stabilizer.  That will get away from the klugy
+#smoothing I am currently doing.
+
 
 #https://en.wikipedia.org/wiki/Binomial_distribution
 #
@@ -1113,10 +1135,6 @@ def bProbMass(n, k):
     if math.isnan(res):
         return bProbMass(n/2.0, k/2.0)
     return res
-
-
-
-
 
 
 
@@ -1483,4 +1501,23 @@ def computePosPredictionRatioScore_save(ddict_list, slice_spec_1, slice_spec_2, 
     return pprs * 100.0, ave_binom_max
 
 
+#
+#
+################################################################################
+
+
+################################################################################
+#
+#Archives
+#
+
     
+#map from feature values to ways of assigning a score
+#If 'float', then sample values from a continuous distribution using parameter args.
+#If a list, then sample values according to the fractions in gl_feature_dist_map.
+#gl_feature_val_to_score_maps = {'age': 'float',
+#                                'teacher':(('Ms. Popcorn', 0.0), ('Miss Fruitdale', 1.0), ('Mr. Applebaum', 2.0)),
+#                                'height': 'float',
+#                                'pet':(('turtle', 0.0), ('fish', 1.0), ('cat', 2.0), ('dog', 3.0))}
+#
+#gl_feature_weight_map = {'age': 1.0, 'teacher': 1.0, 'height': 1.0, 'pet':1.0}

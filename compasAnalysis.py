@@ -23,6 +23,7 @@
 #   -plotting and evaluation functions
 #   -some additional material for running models on the Titanic data set
 # -ELI5 feature importances
+# -export as .json files for viewing in the Confusion Matrix Dashboard
 
 
 
@@ -33,10 +34,46 @@ plt.style.use('ggplot')    #needs explanation
 import matplotlib.ticker as mpl_ticker
 import numpy as np
 import random
-#import builtins
 import math
 import json
 
+
+
+
+#In this file, data items are represented as dicts with key: str feature-name,  value: str feature-value.
+#A colletion of data is a list of dict, referred to here as ddict_list.
+
+
+################################################################################
+#
+#Positive outcome tag
+#
+
+
+#This was originally written for Broward Compas data, where the positive value
+#is about recidivism.  Even as this expands to include Titanic and possibly other
+#data sets, for now the Positive outcome is called gl_recidivism_tag
+#
+#Use these global variables to switch between predicting and scoring two-year recidivism
+#versus violent recidivism.  It seems that for violent recidivism, it is counted even if
+#it occurs after two years.
+#To change these values within an interpreter session, use setRecidType() below.
+#
+###gl_recidivism_tag = 'is_recid'          #Not sure why this is different from two_year_recid
+
+try:
+    gl_recidivism_tag
+except:
+    gl_recidivism_tag = 'two_year_recid'
+    gl_decile_score_tag = 'decile_score'
+    
+#gl_recidivism_tag = 'is_violent_recid'
+#gl_decile_score_tag = 'v_decile_score'
+
+
+#
+#
+################################################################################
 
 
 ################################################################################
@@ -51,11 +88,11 @@ gl_data_filename = 'compas-scores-two-years.csv'
 gl_v_data_filename = 'compas-scores-two-years-violent.csv'
 
 
-def loadDataReturnDict(recid_type='recid'):
+def loadDataReturnDDictList(recid_type='recid'):
     row_list = loadData(recid_type)
     ddict_list = []    #list of dict: data-keys/ data-values
     field_name_index_dict = {}  #key: str field_name
-                           #value: int index
+                                #value: int index
 
     header_row = row_list[0]
     for i in range(len(header_row)):
@@ -161,7 +198,8 @@ def applyFilters(ddict_list, recid_type='recid'):
 
 
 #This builds a histogram of counts of the decile_score_tag which should be an int
-#from 0 to n_bins-1.
+#in range 1-n_bins.
+#Returns an array of int count indexed from 0 to n_bins-1.
 def buildHistByDecile(ddict_list, decile_score_tag=gl_decile_score_tag, n_bins=10):
     hist = [0]*n_bins
     for ddict in ddict_list:
@@ -169,9 +207,6 @@ def buildHistByDecile(ddict_list, decile_score_tag=gl_decile_score_tag, n_bins=1
         if decile_score == None:
             print('problem in buildHistByDecile: no decile_score_tag named ' + decile_score_tag)
             return
-        #if type(decile_score) is str:
-        #    print('problem in buildHistByDecile: decile_score is type string: ' + decile_score)
-        #    return
         decile = int(decile_score) - 1
         hist[decile] += 1
     return hist
@@ -194,22 +229,6 @@ def tallyFieldValues(ddict_list, field_name):
         val_count_dict[val] += 1
     return val_count_dict
 
-
-#Use these global variables to switch between predicting and scoring two-year recidivism
-#versus violent recidivism.  It seems that for violent recidivism, it is counted even if
-#it occurs after two years.
-#To change these values within an interpreter session, use setRecidType() below.
-#
-###gl_recidivism_tag = 'is_recid'          #Not sure why this is different from two_year_recid
-
-try:
-    gl_recidivism_tag
-except:
-    gl_recidivism_tag = 'two_year_recid'
-    gl_decile_score_tag = 'decile_score'
-    
-#gl_recidivism_tag = 'is_violent_recid'
-#gl_decile_score_tag = 'v_decile_score'
 
 
 #recid_type can be 'recid' or one of ('v_recid', 'violent', 'violent_recid')
@@ -235,7 +254,8 @@ def setRecidType(recid_type, ddict_list):
         
 
 
-
+#To get a handle on the data, tally recid/norecid counts for the field values for the
+#field called field_name.
 def tallyFieldValuesVsRecid(ddict_list, field_name):
     val_count_dict = {}     #key:   field_value
                             #value: list: [count, num_recid, num_norecid]
@@ -302,6 +322,7 @@ def plotRecidByDecile(ddict_list, recid_rate_color='blue', plot_what='both', yma
 #  Recall = TP / (TP + FN)
 #Returns an ROC curve in the form of a tuple: (list-of-float: fpr_list, list-of-float: recall_list)
 #Note that the spacing of False Postive Rate in fpr_list will not be even.
+#This hardcodes 10 deciles, for the Broward data.
 def buildROCCurve(ddict_list):
     recid_list = filterDdict(ddict_list, [(gl_recidivism_tag, '==', '1')])
     recid_hist = buildHistByDecile(recid_list)
@@ -495,6 +516,8 @@ def plotCauAAHistByDecileScore(ddict_list):
 #Synthesize data sets with controlled properties.
 #This allows exploration of the characteristics of data distributions
 #that lead to interesting properties of the resulting confusion matrices.
+#This is all precursor and development work for data synthesis that ended
+#up in the Confusion Matrix Dashboard.
 #
 
 
@@ -771,10 +794,13 @@ gl_features_race = ['race', 'age', 'juv_fel_count', 'juv_misd_count', 'juv_other
 
 #in the "minimal" feature set, omit 'sex' and 'race' as features
 #omit age_cat because we construct our own age categories
+#This is the default for most experiments.
 gl_features_min = ['age', 'juv_fel_count', 'juv_misd_count', 'juv_other_count', 'priors_count', 'c_charge_degree', 'c_charge_desc']
 
 
 ####################
+#
+#Titanic features
 #
 #Added material to build and test models on Titanic data.
 #This works with a ddict-list produced by featuresTitanic.py, which does a bit of feature engineering
@@ -806,6 +832,8 @@ gl_features_min = ['age', 'juv_fel_count', 'juv_misd_count', 'juv_other_count', 
 gl_features_titanic = ['Pclass', 'Title', 'Sex', 'AgeCategory', 'FamilySize', 'FarePerPerson', 'Deck', 'EmbarkedFF']
 gl_features_titanic_omit_sex = ['Pclass', 'Title', 'AgeCategory', 'FamilySize', 'FarePerPerson', 'Deck', 'EmbarkedFF']
 
+
+#Legacy calling the positive outcome value, "recidivism"
 gl_recidivism_tag_titanic = 'Survived'
 
 
@@ -819,6 +847,7 @@ gl_feature_type_val_listing_map_titanic = {'Pclass': 'scalar',
                                            'EmbarkedFF': 'scalar'}
 
 
+#Call this to switch between setup for Broward data vs Titanic data.
 #Make sure to use the feature_list gl_features_titanic in train and test programs
 def setupForDataSet(data_set_name = 'titanic'):
     global gl_recidivism_tag
@@ -1080,12 +1109,12 @@ def getTitanicEmbarkedFFFeature(embarkedff):
 #    
 ##############
 #                                       
-#################### Titanic
+#################### Titanic features
 
 
 ####################
 #
-#Broward and general
+#Broward and general features
 #
 
 
@@ -1100,7 +1129,7 @@ def getTitanicEmbarkedFFFeature(embarkedff):
     
 
 #ddict_list is a list of key: raw_feature_name, value: raw_feature_value
-#of a data set as loaded by loadDataReturnDict().
+#of a data set as loaded by loadDataReturnDDictList().
 #Run this after you have run computeChargeDescMap()
 #This function returns three values: (X, y, feature_name_value_reverse_map)
 # X is list of np.array
@@ -1151,7 +1180,7 @@ def convertDdictsToFeatureVectorsAndGT(ddict_list, feature_list=gl_features_min)
 
 
 #Construct a feature_name_value_reverse_map that allows lookup of
-#feature names and values for explanation of feature weights and importances using eli5.
+#feature names and values. This is for explanation of feature weights and importances using eli5.
 #Returns a dict:  key: int index in X_array
 #                 value: str: '[feature_name]:[feature_value]'
 def constructFeatureNameValueReverseMap(feature_list):
@@ -1233,7 +1262,7 @@ def extractDDictsAsFeatures(ddict_list, feature_list=gl_features_min):
                     fdict['c_charge_degree'] = 0     #misdemeanor
                 else:
                     fdict['c_charge_degree'] = 1     #felony
-            #not the best way to do this...
+            #not the best way to do this, but this was tacked on later when we took in Titanic data.
             elif feature_list in (gl_features_titanic, gl_features_titanic_omit_sex):
                 float_val = extractTitanicFeatureValueToFloat(key, ddict.get(key))
                 fdict[key] = float_val
@@ -1949,7 +1978,7 @@ except:
 
 #y is a list of float groundtruth recidivism,  0.0 = norecid, 1.0 = recid
 #pred_scores is a list of float prediction scores in synch with y.
-#Generally, pred_scores will be in the range [-.25, 1.25].
+#Generally, pred_scores will be in the range [-.25, 1.25] for Linear, [0, 1] for Logistic and GBR.
 #This plots two curves, the prediction score density y=0.0 and y=1.0, in different colors.
 def plotPredictionScores(y, pred_scores, ratio_color=None, ymax = 700, show_plots_p=True):
     if len(y) != len(pred_scores):
@@ -2130,6 +2159,7 @@ def plotPredictionScoresAsStackedDecileBars(y, pred_scores, ratio_color=None, ym
         ind = np.arange(n_bins)
         p3 = plt.plot(ind, ratio_array, color=ratio_color)
 
+    #Big trial and error pain to get the number and ticks to look good.
     #stackoverflow...
     #ticks_x = mpl_ticker.FuncFormatter(lambda x, pos: '{0:g}'.format(x/n_bins * the_range + range_min))
     #ax1.xaxis.set_major_formatter(ticks_x)
@@ -2157,7 +2187,7 @@ def plotPredictionScoresAsStackedDecileBars(y, pred_scores, ratio_color=None, ym
 
 #y is a list of float groundtruth recidivism,  0.0 = norecid, 1.0 = recid
 #pred_scores is a list of float prediction scores in synch with y.
-#Generally, pred_scores will be in the range [-.5, 1.5] or [-.25, 1.25].
+#Generally, pred_scores will be in the range [-.5, 1.5] or [-.25, 1.25], or [0, 1].
 #This builds a table of prob recid vs prediction score, in the same manner as
 #the function, plotPredictionScores() above tallies counts of recid and norecid across
 #a histogram of prediction scores.
@@ -2718,6 +2748,62 @@ def writeCOMPASPredictionsToJSONFile(ddict_list, json_filepath, nickname, displa
 
 
 
+#Take a set of groundtruth observations y and predictions y_preds and write to a JSON file.
+#This is used for example if KFold cross validation is used to produce a set of GBR models
+#that were used to produce KFold predictions.
+#
+#After running runTrainTestKFold(ddict_list2, ...
+#call as 
+#>>> ca.writeModelPredictionsToJSONFile(gl_last_y, gl_last_preds, ddict_list2, json_filepath, data_set_name, display_name,
+#                                       notes, 10, [('race', '==', 'African American')('race', '==', 'Caucasian')], True)
+def writeModelPredictionsToJSONFile(y, preds, ddict_list, json_filepath, data_set_name, display_name, notes, num_bins=20,
+                                    slice_spec_list = None, overwrite_existing_file_p=False):
+    if os.path.exists(json_filepath):
+        if not overwrite_existing_file_p:
+            print('filepath ' + json_filepath + ' already exists, not overwriting')            
+            return;
+        print('filepath ' + json_filepath + ' already exists, overwriting with a new file')
+
+    json_dict = {'data-set-nickname': data_set_name,
+                 'data-set-display-name': display_name, 
+                 'notes': notes,
+                 'data-slices': {}
+                 }
+
+    ddict_index_map = {}   #key: ddict  value: int index in ddict_list
+    for index in range(len(ddict_list)):
+        ddict = ddict_list[index]
+        ddict['index'] = index;
+    
+    hist_arrays = predictionScoresToHistArrays(y, preds, num_bins)
+    pos_hist = hist_arrays[0]
+    neg_hist = hist_arrays[1]
+    json_dict['data-slices']['all-data'] = {'pos-outcomes': pos_hist,
+                                            'neg-outcomes': neg_hist}
+    if slice_spec_list == None:
+        slice_spec_list = []
+    for slice_spec in slice_spec_list:
+        if len(slice_spec) > 3:
+            slice_name = slice_spec[3]
+        else:
+            slice_name = slice_spec[2]
+        ddict_list_slice = filterDdict(ddict_list, [slice_spec])
+        y_slice = []
+        preds_slice = []
+        for ddict in ddict_list_slice:
+            index = ddict.get('index')
+            y_slice.append(y[index])
+            preds_slice.append(preds[index])
+        
+        hist_arrays = predictionScoresToHistArrays(y_slice, preds_slice, num_bins)
+        pos_hist = hist_arrays[0]
+        neg_hist = hist_arrays[1]
+        json_dict['data-slices'][slice_name] = {'pos-outcomes': pos_hist,
+                                                'neg-outcomes': neg_hist}
+    with open(json_filepath, 'w') as file:
+        json.dump(json_dict, file, indent=4)
+        
+
 #
 #
 ################################################################################
@@ -2760,6 +2846,9 @@ except:
                 
 
 #train a model on all of the data and test on all of the data
+#Use this for Linear Regression and Logistic Regression models.
+#The results are put into a bunch of global variables which you can then feed into
+#plotting or write to file functions.
 def runTrainTestFull(ddict_list, feature_list = gl_features_min, score_threshold=None):
     print('feature_list: ' + str(feature_list))
     X, y, feature_name_value_reverse_map = convertDdictsToFeatureVectorsAndGT(ddict_list, feature_list)
@@ -2818,7 +2907,9 @@ gl_kfold_n_splits = 5
 #This is strictly needed for modeling with many-parameter models like GBR.
 #By experimentation, I selected default GBR parameters that appear to not overfit on
 #the ProPublica/COMPAS data set, so it is probably fine to use a GBR model trained on all of the data.  
-#A linear model has few enough parameters that k-fold slicing is not necessary.
+#A linear model has few enough parameters that k-fold slicing is probably not necessary.
+#The results are put into a bunch of global variables which you can then feed into
+#plotting or write to file functions.
 def runTrainTestKFold(ddict_list, feature_list = gl_features_min, score_threshold=None):
     print('feature_list: ' + str(feature_list))
     X, y, feature_name_value_reverse_map = convertDdictsToFeatureVectorsAndGT(ddict_list, feature_list)
@@ -3096,6 +3187,8 @@ def runTrainTestFull_SelectRace(ddict_list, target_race, feature_list = gl_featu
 
 #run the model on ddict_list including 'all-data' and the slices specified in slice_spec_list.
 #write as a json file that can be imported into the PDCM Dashboard (Prediction Distribution Confusion Matrix)
+#This applies to a Logistic Regression model type where we can apply a single fit model to
+#the entire data set.
 def runModelWriteHistArraysToJSONFile(ddict_list, model, json_filepath, data_set_name, display_name, notes,
                                       feature_list = gl_features_min,
                                       num_bins=20,
@@ -3138,67 +3231,7 @@ def runModelWriteHistArraysToJSONFile(ddict_list, model, json_filepath, data_set
     with open(json_filepath, 'w') as file:
         json.dump(json_dict, file, indent=4)
         
-
-
-
         
-
-#Take a set of groundtruth observations y and predictions y_preds and write to a JSON file.
-#This is used for example if KFold cross validation is used to produce a set of GBR models
-#that were used to produce KFold predictions.
-#
-#After running runTrainTestKFold(ddict_list2, ...
-#call as 
-#>>> ca.writeModelPredictionsToJSONFile(gl_last_y, gl_last_preds, ddict_list2, json_filepath, data_set_name, display_name,
-#                                       notes, [('race', '==', 'African American')('race', '==', 'Caucasian')], True)
-def writeModelPredictionsToJSONFile(y, preds, ddict_list, json_filepath, data_set_name, display_name, notes, num_bins=20,
-                                    slice_spec_list = None, overwrite_existing_file_p=False):
-    if os.path.exists(json_filepath):
-        if not overwrite_existing_file_p:
-            print('filepath ' + json_filepath + ' already exists, not overwriting')            
-            return;
-        print('filepath ' + json_filepath + ' already exists, overwriting with a new file')
-
-    json_dict = {'data-set-nickname': data_set_name,
-                 'data-set-display-name': display_name, 
-                 'notes': notes,
-                 'data-slices': {}
-                 }
-
-    ddict_index_map = {}   #key: ddict  value: int index in ddict_list
-    for index in range(len(ddict_list)):
-        ddict = ddict_list[index]
-        ddict['index'] = index;
-    
-    hist_arrays = predictionScoresToHistArrays(y, preds, num_bins)
-    pos_hist = hist_arrays[0]
-    neg_hist = hist_arrays[1]
-    json_dict['data-slices']['all-data'] = {'pos-outcomes': pos_hist,
-                                            'neg-outcomes': neg_hist}
-    if slice_spec_list == None:
-        slice_spec_list = []
-    for slice_spec in slice_spec_list:
-        if len(slice_spec) > 3:
-            slice_name = slice_spec[3]
-        else:
-            slice_name = slice_spec[2]
-        ddict_list_slice = filterDdict(ddict_list, [slice_spec])
-        y_slice = []
-        preds_slice = []
-        for ddict in ddict_list_slice:
-            index = ddict.get('index')
-            y_slice.append(y[index])
-            preds_slice.append(preds[index])
-        
-        hist_arrays = predictionScoresToHistArrays(y_slice, preds_slice, num_bins)
-        pos_hist = hist_arrays[0]
-        neg_hist = hist_arrays[1]
-        json_dict['data-slices'][slice_name] = {'pos-outcomes': pos_hist,
-                                                'neg-outcomes': neg_hist}
-    with open(json_filepath, 'w') as file:
-        json.dump(json_dict, file, indent=4)
-        
-
 
 #
 #
