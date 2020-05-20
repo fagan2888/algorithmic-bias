@@ -7,7 +7,7 @@ and the Confusion Matrix.  The Confusion Matrix Dashboard also plots Positive Pr
 and calculates a PPRS (Positive Prediction Ratio Score).
 
 See also the article,
- "Measuring Algorithmic Bias:
+ "Algorithmic Bias and the Confusion Matrix Dashboard:
  How a Confusion Matrix Behaves Under Distributions of Prediction Scores"
 
 
